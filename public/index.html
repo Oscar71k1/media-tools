@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Media-tools</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles/main.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1 class="title">🎛 Procesador de Medios</h1>
+            <p class="subtitle">Convierte, combina y gestiona contenido multimedia fácilmente</p>
+        </header>    
+
+        <main class="main-content">
+            <!-- Formulario principal -->
+            <section class="form-section card">
+                <h2 class="section-title">Nueva Descarga</h2>
+                <form id="videoForm" class="video-form">
+                    <div class="form-group">
+                        <label for="videoUrl" class="form-label">URL del Video</label>
+                        <div class="input-wrapper">
+                            <input 
+                                type="url" 
+                                id="videoUrl" 
+                                class="form-input" 
+                                placeholder="https://www.youtube.com/watch?v=..."
+                                required
+                            >
+                            <button type="button" id="pasteBtn" class="btn-icon" title="Pegar URL">
+                                📋
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Formato</label>
+                        <div class="radio-group">
+                            <label class="radio-label">
+                                <input type="radio" name="format" value="video" checked>
+                                <span>📹 Video (MP4) - Mejor Calidad</span>
+                            </label>
+                            <label class="radio-label">
+                                <input type="radio" name="format" value="mp3">
+                                <span>🎵 Audio (MP3) - Mejor Calidad</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <button type="submit" id="downloadBtn" class="btn btn-primary">
+                        <span class="btn-text">⬇️ Descargar</span>
+                        <span class="btn-loader" style="display: none;">⏳</span>
+                    </button>
+                </form>
+            </section>
+        </main>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <!-- Scripts -->
+    <script type="module" src="{{ url_for('static', filename='main.js') }}"></script>
+</body>
+</html>
+
