@@ -49,8 +49,28 @@ def download_video(url, format_id=None):
             ydl_format = 'bestaudio/best'
         else:
             is_audio = False
-            ydl_format = 'bv*+ba/b'
+            # Usar formatos más simples que no requieran PO tokens
+            ydl_format = 'best[ext=mp4]/best[height<=720]/best[height<=480]/best'
 
+        # User-Agent actualizado y realista
+        user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        
+        # Extraer visitor_data de las cookies si existen
+        visitor_data = None
+        if os.path.exists('cookies.txt'):
+            try:
+                with open('cookies.txt', 'r', encoding='utf-8') as f:
+                    for line in f:
+                        if 'VISITOR_INFO1_LIVE' in line and not line.strip().startswith('#'):
+                            parts = line.strip().split('\t')
+                            if len(parts) >= 7:
+                                visitor_data = parts[6]  # El valor de la cookie
+                                print(f"Visitor data extraído: {visitor_data[:20]}...")
+                                break
+            except Exception as e:
+                print(f"Error al extraer visitor_data: {e}")
+                pass
+        
         ydl_opts = {
             'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
             'quiet': False,
@@ -58,9 +78,49 @@ def download_video(url, format_id=None):
             'ignoreerrors': False,
             'noplaylist': True,
             'socket_timeout': 30,
-            'retries': 3,
+            'retries': 10,
+            'fragment_retries': 10,
             'format': ydl_format,
+            
+            # User-Agent realista
+            'user_agent': user_agent,
+            
+            # Headers completos de navegador real
+            'http_headers': {
+                'User-Agent': user_agent,
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Language': 'es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'DNT': '1',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Sec-Fetch-User': '?1',
+                'Cache-Control': 'max-age=0',
+            },
+            
+            # Configuración específica para YouTube - se probarán diferentes clientes
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['mweb'],  # Empezar con mweb (móvil web) que suele funcionar mejor
+                    'player_skip': ['webpage'],
+                }
+            },
+            
+            # Evitar detección adicional
+            'no_check_certificate': False,
+            'prefer_insecure': False,
         }
+        
+        # Agregar visitor_data si se encontró en las cookies
+        if visitor_data:
+            ydl_opts['extractor_args']['youtube']['visitor_data'] = visitor_data
+        
+        # Agregar cookies si el archivo existe
+        if os.path.exists('cookies.txt'):
+            ydl_opts['cookiefile'] = 'cookies.txt'
 
         if is_audio:
             if ffmpeg_available:
@@ -73,9 +133,63 @@ def download_video(url, format_id=None):
             ydl_opts['merge_output_format'] = 'mp4'
 
         print(f"Descargando {('audio' if is_audio else 'video')} con formato: {ydl_format}")
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            title = sanitize_filename(info.get('title', 'video'))
+        
+        # Estrategia: probar diferentes clientes y formatos
+        client_strategies = ['mweb', 'tv_embedded', 'web', 'android', 'ios']
+        format_strategies = [ydl_format]
+        if not is_audio:
+            format_strategies.extend([
+                'best[ext=mp4]/best',
+                'bestvideo+bestaudio/best',
+                'worstvideo+worstaudio/worst',
+                'best',
+                'worst'
+            ])
+        else:
+            format_strategies.extend(['bestaudio', 'worstaudio'])
+        
+        last_error = None
+        success = False
+        
+        # Probar diferentes clientes
+        for client in client_strategies:
+            if success:
+                break
+                
+            ydl_opts['extractor_args']['youtube']['player_client'] = [client]
+            if visitor_data:
+                ydl_opts['extractor_args']['youtube']['visitor_data'] = visitor_data
+            
+            # Probar diferentes formatos con este cliente
+            for fmt_strategy in format_strategies:
+                try:
+                    ydl_opts['format'] = fmt_strategy
+                    print(f"Intentando con cliente '{client}' y formato: {fmt_strategy}")
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        info = ydl.extract_info(url, download=True)
+                        title = sanitize_filename(info.get('title', 'video'))
+                        success = True
+                        break  # Si funciona, salir del loop
+                except Exception as e:
+                    last_error = e
+                    error_msg = str(e).lower()
+                    # Si es un error de formato no disponible, intentar el siguiente
+                    if 'format is not available' in error_msg or 'requested format' in error_msg:
+                        print(f"Cliente '{client}' con formato {fmt_strategy} no disponible, probando siguiente...")
+                        continue
+                    elif 'signature' in error_msg or 'challenge' in error_msg or 'sabr' in error_msg:
+                        # Si hay problemas con firmas, probar otro cliente
+                        print(f"Cliente '{client}' tiene problemas con firmas, probando otro cliente...")
+                        break
+                    else:
+                        # Si es otro tipo de error, continuar
+                        continue
+        
+        if not success:
+            # Si todos los formatos y clientes fallaron
+            if last_error:
+                raise last_error
+            raise Exception("No se pudo descargar con ningún formato o cliente disponible. YouTube puede estar bloqueando las descargas.")
 
         # Buscar archivo descargado
         files = [
@@ -190,8 +304,47 @@ def download():
 
 if __name__ == '__main__':
     import os
+    import socket
+    
     DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
     HOST = os.getenv('HOST', '0.0.0.0')
     PORT = int(os.getenv('PORT', 5000))
+    
+    # Función para obtener la IP local del dispositivo
+    def get_local_ip():
+        """Obtiene la IP local del dispositivo en la red"""
+        try:
+            # Conecta a un servidor externo para determinar la IP local
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            # No necesita conectarse realmente, solo determina la interfaz
+            s.connect(('8.8.8.8', 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            try:
+                # Método alternativo
+                hostname = socket.gethostname()
+                ip = socket.gethostbyname(hostname)
+                return ip
+            except Exception:
+                return 'localhost'
+    
+    # Obtener y mostrar la IP local
+    local_ip = get_local_ip()
+    
+    print("\n" + "="*50)
+    print("🚀 Servidor iniciado!")
+    print("="*50)
+    print(f"📱 Accede desde tu celular u otros dispositivos:")
+    print(f"   http://{local_ip}:{PORT}")
+    print(f"   http://{local_ip}:{PORT}/")
+    print("="*50)
+    print(f"💻 O desde este dispositivo:")
+    print(f"   http://localhost:{PORT}")
+    print(f"   http://127.0.0.1:{PORT}")
+    print("="*50)
+    print(f"🌐 Asegúrate de que tu celular esté en la misma red WiFi")
+    print("="*50 + "\n")
     
     app.run(debug=DEBUG, host=HOST, port=PORT)
