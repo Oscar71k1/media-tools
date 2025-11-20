@@ -150,6 +150,7 @@ def download_video(url, format_id=None):
         
         last_error = None
         success = False
+        json_blocked_count = 0  # Contador de errores de JSON bloqueado
         
         # Probar diferentes clientes
         for client in client_strategies:
@@ -159,6 +160,8 @@ def download_video(url, format_id=None):
             ydl_opts['extractor_args']['youtube']['player_client'] = [client]
             if visitor_data:
                 ydl_opts['extractor_args']['youtube']['visitor_data'] = visitor_data
+            
+            client_json_blocked = False
             
             # Probar diferentes formatos con este cliente
             for fmt_strategy in format_strategies:
@@ -173,23 +176,48 @@ def download_video(url, format_id=None):
                 except Exception as e:
                     last_error = e
                     error_msg = str(e).lower()
-                    # Si es un error de formato no disponible, intentar el siguiente
-                    if 'format is not available' in error_msg or 'requested format' in error_msg:
-                        print(f"Cliente '{client}' con formato {fmt_strategy} no disponible, probando siguiente...")
+                    error_str = str(e)
+                    
+                    # Detectar si YouTube está bloqueando JSON completamente
+                    if 'failed to parse json' in error_msg or 'failed to extract any player response' in error_msg:
+                        json_blocked_count += 1
+                        client_json_blocked = True
+                        print(f"⚠️ YouTube está bloqueando respuestas JSON con cliente '{client}'")
+                        # Si varios clientes tienen este problema, es un bloqueo general
+                        if json_blocked_count >= 2:
+                            print("⚠️ YouTube parece estar bloqueando completamente las descargas desde esta IP")
+                            time.sleep(2)  # Delay antes de probar otro cliente
+                        break  # Cambiar de cliente inmediatamente
+                    # Si es un error de formato no disponible, intentar el siguiente formato
+                    elif 'format is not available' in error_msg or 'requested format' in error_msg:
+                        print(f"Formato {fmt_strategy} no disponible, probando siguiente...")
                         continue
+                    # Si hay problemas con firmas, probar otro cliente
                     elif 'signature' in error_msg or 'challenge' in error_msg or 'sabr' in error_msg:
-                        # Si hay problemas con firmas, probar otro cliente
                         print(f"Cliente '{client}' tiene problemas con firmas, probando otro cliente...")
                         break
+                    # Si es un error de bot detection
+                    elif 'bot' in error_msg or 'confirm that you are not a bot' in error_msg:
+                        print(f"⚠️ YouTube detectó bot con cliente '{client}'")
+                        json_blocked_count += 1
+                        break
                     else:
-                        # Si es otro tipo de error, continuar
+                        # Si es otro tipo de error, continuar con siguiente formato
+                        print(f"Error con formato {fmt_strategy}: {error_str[:100]}")
                         continue
+            
+            # Si este cliente fue bloqueado, agregar delay antes del siguiente
+            if client_json_blocked:
+                time.sleep(1)
         
         if not success:
             # Si todos los formatos y clientes fallaron
-            if last_error:
+            if json_blocked_count >= 2:
+                raise Exception("YouTube está bloqueando las descargas desde esta IP. Esto puede deberse a: 1) Detección de bot, 2) IP bloqueada, 3) Cookies expiradas. Intenta actualizar las cookies o usar un proxy diferente.")
+            elif last_error:
                 raise last_error
-            raise Exception("No se pudo descargar con ningún formato o cliente disponible. YouTube puede estar bloqueando las descargas.")
+            else:
+                raise Exception("No se pudo descargar con ningún formato o cliente disponible. YouTube puede estar bloqueando las descargas.")
 
         # Buscar archivo descargado
         files = [
