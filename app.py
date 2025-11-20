@@ -57,9 +57,30 @@ def download_video(url, format_id=None):
         
         # Extraer visitor_data de las cookies si existen
         visitor_data = None
-        if os.path.exists('cookies.txt'):
+        cookies_file_path = None
+        
+        # Primero intentar leer cookies desde variable de entorno
+        cookies_from_env = os.getenv('YOUTUBE_COOKIES')
+        if cookies_from_env:
             try:
-                with open('cookies.txt', 'r', encoding='utf-8') as f:
+                # Crear archivo temporal con las cookies de la variable de entorno
+                cookies_file_path = os.path.join(temp_dir, 'cookies_temp.txt')
+                with open(cookies_file_path, 'w', encoding='utf-8') as f:
+                    f.write(cookies_from_env)
+                print("Cookies cargadas desde variable de entorno YOUTUBE_COOKIES")
+            except Exception as e:
+                print(f"Error al crear archivo temporal de cookies: {e}")
+                cookies_file_path = None
+        
+        # Si no hay cookies en variable de entorno, usar archivo local
+        if not cookies_file_path and os.path.exists('cookies.txt'):
+            cookies_file_path = 'cookies.txt'
+            print("Cookies cargadas desde archivo cookies.txt")
+        
+        # Extraer visitor_data de las cookies
+        if cookies_file_path:
+            try:
+                with open(cookies_file_path, 'r', encoding='utf-8') as f:
                     for line in f:
                         if 'VISITOR_INFO1_LIVE' in line and not line.strip().startswith('#'):
                             parts = line.strip().split('\t')
@@ -117,10 +138,22 @@ def download_video(url, format_id=None):
         # Agregar visitor_data si se encontró en las cookies
         if visitor_data:
             ydl_opts['extractor_args']['youtube']['visitor_data'] = visitor_data
+            print(f"✅ Visitor data configurado: {visitor_data[:30]}...")
+        else:
+            print("⚠️ No se encontró visitor_data en las cookies")
         
-        # Agregar cookies si el archivo existe
-        if os.path.exists('cookies.txt'):
-            ydl_opts['cookiefile'] = 'cookies.txt'
+        # Agregar cookies si existe el archivo (de variable de entorno o local)
+        if cookies_file_path and os.path.exists(cookies_file_path):
+            ydl_opts['cookiefile'] = cookies_file_path
+            # Verificar que el archivo tenga contenido
+            try:
+                with open(cookies_file_path, 'r', encoding='utf-8') as f:
+                    cookie_lines = [l for l in f if l.strip() and not l.strip().startswith('#')]
+                    print(f"✅ Cookies configuradas: {len(cookie_lines)} cookies encontradas en {cookies_file_path}")
+            except Exception as e:
+                print(f"⚠️ Error al verificar cookies: {e}")
+        else:
+            print("⚠️ No se encontró archivo de cookies")
 
         if is_audio:
             if ffmpeg_available:
